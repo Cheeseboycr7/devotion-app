@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
-import { Sunrise, Shuffle, RotateCcw, Star, Check, ChevronDown, ChevronUp, NotebookPen, History } from "lucide-react";
+import { Sunrise, Shuffle, RotateCcw, Star, Check, ChevronDown, ChevronUp, NotebookPen, History, Clock, BookOpen } from "lucide-react";
+import { DEVOTIONS } from "./devotions.js";
 
 // ---------------------------------------------------------------------------
 // Verse bank — public domain (KJV) text, curated for Monday workplace devotion:
@@ -68,6 +69,12 @@ function formatDate(date) {
   return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 }
 
+function estimateReadMinutes(paragraphs) {
+  const words = paragraphs.join(" ").split(/\s+/).filter(Boolean).length;
+  // ~130 words/min is a natural spoken-devotion pace
+  return Math.max(1, Math.round(words / 130));
+}
+
 // --- localStorage helpers (standalone deployment; no window.storage here) ---
 function lsGet(key, fallback) {
   try {
@@ -96,9 +103,12 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [presentedToday, setPresentedToday] = useState(false);
+  const [devotionOpen, setDevotionOpen] = useState(true);
 
   const verse = VERSES[index];
   const isDefaultWeek = index === defaultIndex;
+  const devotionParagraphs = DEVOTIONS[verse.id] || [];
+  const readMinutes = estimateReadMinutes(devotionParagraphs);
 
   useEffect(() => {
     setFavorites(lsGet("devotion.favorites", {}));
@@ -107,6 +117,7 @@ export default function App() {
 
   useEffect(() => {
     setNote(lsGet(`devotion.note.${verse.id}`, ""));
+    setDevotionOpen(true);
   }, [verse.id]);
 
   useEffect(() => {
@@ -181,9 +192,37 @@ export default function App() {
           <p className="text-[1.55rem] sm:text-[1.85rem] leading-[1.45] text-[#1B2A2E] font-serif">"{verse.text}"</p>
           <p className="mt-4 text-sm font-semibold tracking-wide text-[#C89B3C]">— {verse.ref} (KJV)</p>
 
+          {devotionParagraphs.length > 0 && (
+            <div className="mt-7 pt-6 border-t border-[#EAEDE9]">
+              <button
+                onClick={() => setDevotionOpen(!devotionOpen)}
+                className="w-full flex items-center justify-between mb-1"
+              >
+                <span className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.14em] text-[#8A9A93] font-semibold">
+                  <BookOpen className="w-3.5 h-3.5" /> 5-Minute Devotion
+                </span>
+                <span className="inline-flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 text-[11px] text-[#8A9A93]">
+                    <Clock className="w-3 h-3" /> ~{readMinutes} min
+                  </span>
+                  {devotionOpen ? <ChevronUp className="w-4 h-4 text-[#8A9A93]" /> : <ChevronDown className="w-4 h-4 text-[#8A9A93]" />}
+                </span>
+              </button>
+              {devotionOpen && (
+                <div className="mt-3 space-y-3.5">
+                  {devotionParagraphs.map((p, i) => (
+                    <p key={i} className="text-[0.95rem] leading-relaxed text-[#3A4A46]">
+                      {p}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="mt-7 pt-6 border-t border-[#EAEDE9] space-y-4">
             <div>
-              <div className="text-[11px] uppercase tracking-[0.14em] text-[#8A9A93] font-semibold mb-1">Reflection</div>
+              <div className="text-[11px] uppercase tracking-[0.14em] text-[#8A9A93] font-semibold mb-1">Quick reflection</div>
               <p className="text-[0.95rem] leading-relaxed text-[#3A4A46]">{verse.reflection}</p>
             </div>
             <div>
