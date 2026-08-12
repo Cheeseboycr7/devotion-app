@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   Sunrise, Shuffle, RotateCcw, Star, Check, ChevronDown, ChevronUp,
-  NotebookPen, History, Clock, BookOpen, Settings, Lock, Unlock, User,
-  Plus, Share2, Printer, Download, ListMusic, X, Copy,
+  NotebookPen, History, Clock, BookOpen, Settings, User, LogOut,
+  Plus, Share2, Printer, Download, ListMusic, X, Maximize2, Minimize2,
+  CalendarDays, MessageCircleQuestion, Link2, Users, ChevronLeft, ChevronRight, Mail,
 } from "lucide-react";
 import { DEVOTIONS } from "./devotions.js";
+import { DISCUSSION_QUESTIONS, RELATED_VERSES } from "./extras.js";
+import { supabase } from "./supabaseClient.js";
 
 // ---------------------------------------------------------------------------
 // Verse bank — public domain (KJV) text, curated for Monday workplace devotion:
@@ -69,6 +72,21 @@ function weekIndex(date, length) {
   return (year * 53 + week) % length;
 }
 
+function weekKey(date) {
+  return `${date.getFullYear()}-W${String(isoWeekNumber(date)).padStart(2, "0")}`;
+}
+
+function addDays(date, n) {
+  return new Date(date.getTime() + n * DAY_MS);
+}
+
+function mondayOfWeek(date) {
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const day = d.getDay(); // 0 Sun, 1 Mon, ... 6 Sat
+  const diff = day === 0 ? -6 : 1 - day; // shift back to Monday
+  return addDays(d, diff);
+}
+
 function formatDate(date) {
   return date.toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric", year: "numeric" });
 }
@@ -78,30 +96,113 @@ function estimateReadMinutes(paragraphs) {
   return Math.max(1, Math.round(words / 130));
 }
 
-function lsGet(key, fallback) {
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
-  } catch (e) {
-    return fallback;
+// --- top-level: auth gate ---
+export default function App() {
+  const [session, setSession] = useState(undefined); // undefined = loading
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, sess) => setSession(sess));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  if (session === undefined) {
+    return <div className="min-h-screen w-full bg-[#EEF2EF]" />;
   }
-}
-function lsSet(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch (e) {}
+  if (!session) {
+    return <AuthScreen />;
+  }
+  return <DevotionApp key={session.user.id} userId={session.user.id} userEmail={session.user.email} />;
 }
 
-export default function App() {
+function AuthScreen() {
+  const [mode, setMode] = useState("signin"); // signin | signup
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    setError("");
+    setMessage("");
+    if (!email.trim() || !password) {
+      setError("Enter an email and password.");
+      return;
+    }
+    setLoading(true);
+    if (mode === "signup") {
+      const { error: signUpError } = await supabase.auth.signUp({ email: email.trim(), password });
+      setLoading(false);
+      if (signUpError) {
+        setError(signUpError.message);
+      } else {
+        setMessage("Account created. Check your email to confirm, then sign in.");
+      }
+    } else {
+      const { error: signInError } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+      setLoading(false);
+      if (signInError) setError(signInError.message);
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full bg-[#EEF2EF] text-[#1B2A2E] font-sans flex items-center justify-center px-6">
+      <div className="max-w-sm w-full">
+        <Horizon />
+        <div className="mt-8 bg-[#FBFAF7] border border-[#E2E7E1] rounded-2xl px-7 py-8 text-center">
+          <h1 className="text-lg font-semibold mb-1">{mode === "signup" ? "Create your account" : "Welcome back"}</h1>
+          <p className="text-sm text-[#5C7269] mb-5">Monday Devotion</p>
+          <div className="space-y-2.5 text-left">
+            <div>
+              <label className="text-[11px] uppercase tracking-[0.14em] text-[#8A9A93] font-semibold">Email</label>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full mt-1 text-sm rounded-lg border border-[#D7DED9] bg-white px-3 py-2.5"
+                placeholder="you@company.com"
+              />
+            </div>
+            <div>
+              <label className="text-[11px] uppercase tracking-[0.14em] text-[#8A9A93] font-semibold">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && submit()}
+                className="w-full mt-1 text-sm rounded-lg border border-[#D7DED9] bg-white px-3 py-2.5"
+                placeholder="At least 6 characters"
+              />
+            </div>
+          </div>
+          {error && <p className="text-sm text-red-600 mt-3 text-left">{error}</p>}
+          {message && <p className="text-sm text-[#3F6B5E] mt-3 text-left">{message}</p>}
+          <button
+            onClick={submit}
+            disabled={loading}
+            className="w-full mt-4 bg-[#1B2A2E] text-white rounded-lg py-2.5 text-sm font-medium hover:bg-[#28393E] transition-colors disabled:opacity-60"
+          >
+            {loading ? "Please wait…" : mode === "signup" ? "Sign up" : "Log in"}
+          </button>
+          <button
+            onClick={() => { setMode(mode === "signup" ? "signin" : "signup"); setError(""); setMessage(""); }}
+            className="w-full mt-3 text-xs text-[#5C7269] hover:text-[#1B2A2E]"
+          >
+            {mode === "signup" ? "Already have an account? Log in" : "New here? Create an account"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DevotionApp({ userId, userEmail }) {
   const today = useMemo(() => new Date(), []);
 
-  // --- privacy / profile ---
-  const [pin, setPin] = useState(null);
+  // --- account / profile ---
   const [profileName, setProfileName] = useState("");
-  const [unlocked, setUnlocked] = useState(false);
-  const [pinReady, setPinReady] = useState(false);
-  const [pinAttempt, setPinAttempt] = useState("");
-  const [pinError, setPinError] = useState("");
+  const [dataReady, setDataReady] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
 
   // --- verse data ---
@@ -111,6 +212,7 @@ export default function App() {
   const [index, setIndex] = useState(0);
 
   // --- content state ---
+  const [notes, setNotes] = useState({}); // { [verseId]: text }
   const [note, setNote] = useState("");
   const [saveState, setSaveState] = useState("idle");
   const [favorites, setFavorites] = useState({});
@@ -125,6 +227,17 @@ export default function App() {
   const [seriesPicker, setSeriesPicker] = useState(false);
   const [seriesPos, setSeriesPos] = useState(0);
 
+  // --- presentation mode ---
+  const [presentMode, setPresentMode] = useState(false);
+
+  // --- look-ahead & week overrides ---
+  const [lookAheadOpen, setLookAheadOpen] = useState(false);
+  const [weekOverrides, setWeekOverrides] = useState({});
+
+  // --- rotation tracker ---
+  const [presenters, setPresenters] = useState([]);
+  const [presentersOpen, setPresentersOpen] = useState(false);
+
   // --- custom verse form ---
   const [addVerseOpen, setAddVerseOpen] = useState(false);
   const [newVerse, setNewVerse] = useState({ ref: "", theme: "", text: "", devotion: "", reflection: "", application: "" });
@@ -132,16 +245,44 @@ export default function App() {
   // --- share feedback ---
   const [copyFeedback, setCopyFeedback] = useState("");
 
-  // Load persisted app-level data
+  // Generic saver: updates one column on this user's row in Supabase.
+  const saveField = useCallback(
+    async (field, value) => {
+      try {
+        await supabase.from("user_data").update({ [field]: value, updated_at: new Date().toISOString() }).eq("user_id", userId);
+      } catch (e) {
+        console.error("Save failed", e);
+      }
+    },
+    [userId]
+  );
+
+  // Load this user's row (created automatically on signup by a DB trigger).
   useEffect(() => {
-    setPin(lsGet("devotion.pin", null));
-    setProfileName(lsGet("devotion.profileName", ""));
-    setCustomVerses(lsGet("devotion.customVerses", []));
-    setFavorites(lsGet("devotion.favorites", {}));
-    setHistory(lsGet("devotion.history", []));
-    setUnlocked(sessionStorage.getItem("devotion.unlocked") === "1");
-    setPinReady(true);
-  }, []);
+    let cancelled = false;
+    (async () => {
+      let { data, error } = await supabase.from("user_data").select("*").eq("user_id", userId).single();
+      if ((error || !data) && !cancelled) {
+        // Fallback in case the row wasn't created yet — create it now.
+        const { data: inserted } = await supabase
+          .from("user_data")
+          .insert({ user_id: userId })
+          .select()
+          .single();
+        data = inserted;
+      }
+      if (cancelled || !data) return;
+      setProfileName(data.profile_name || "");
+      setCustomVerses(data.custom_verses || []);
+      setFavorites(data.favorites || {});
+      setHistory(data.history || []);
+      setWeekOverrides(data.week_overrides || {});
+      setPresenters(data.presenters || []);
+      setNotes(data.notes || {});
+      setDataReady(true);
+    })();
+    return () => { cancelled = true; };
+  }, [userId]);
 
   // Set default verse index once verse list is ready
   useEffect(() => {
@@ -150,8 +291,49 @@ export default function App() {
   }, [customVerses.length]);
 
   const seriesList = seriesTheme ? allVerses.filter((v) => v.theme === seriesTheme) : null;
-  const verse = seriesList ? seriesList[seriesPos] : allVerses[index] || allVerses[0];
-  const isDefaultWeek = !seriesTheme && index === defaultIndex;
+  const thisWeekKey = weekKey(today);
+  const overrideId = weekOverrides[thisWeekKey];
+  const overrideVerse = overrideId ? allVerses.find((v) => v.id === overrideId) : null;
+  const verse = seriesList ? seriesList[seriesPos] : overrideVerse || allVerses[index] || allVerses[0];
+  const isDefaultWeek = !seriesTheme && !overrideVerse && index === defaultIndex;
+
+  const setWeekOverride = (wKey, verseId) => {
+    const next = { ...weekOverrides };
+    if (verseId) next[wKey] = verseId;
+    else delete next[wKey];
+    setWeekOverrides(next);
+    saveField("week_overrides", next);
+  };
+
+  const lookAheadWeeks = useMemo(() => {
+    const mon = mondayOfWeek(today);
+    const weeks = [];
+    for (let i = 0; i < 5; i++) {
+      const wDate = addDays(mon, i * 7);
+      const wKey = weekKey(wDate);
+      const override = weekOverrides[wKey];
+      const defaultV = allVerses[weekIndex(wDate, allVerses.length)];
+      const presenter = presenters.length ? presenters[weekIndex(wDate, presenters.length)] : null;
+      weeks.push({
+        wKey,
+        date: wDate,
+        verse: override ? allVerses.find((v) => v.id === override) : defaultV,
+        isOverride: !!override,
+        presenter,
+      });
+    }
+    return weeks;
+  }, [today, weekOverrides, allVerses, presenters]);
+
+  const currentPresenter = presenters.length ? presenters[weekIndex(today, presenters.length)] : null;
+
+  const savePresenters = (list) => {
+    setPresenters(list);
+    saveField("presenters", list);
+  };
+
+  const discussionQuestions = verse ? (DISCUSSION_QUESTIONS[verse.id] || verse.discussionQuestions || []) : [];
+  const relatedVerses = verse ? (RELATED_VERSES[verse.id] || verse.relatedVerses || []) : [];
 
   const fullDevotionParagraphs = DEVOTIONS[verse?.id] || (verse?.devotion ? verse.devotion : []);
   const devotionParagraphs =
@@ -161,8 +343,9 @@ export default function App() {
   const readMinutes = estimateReadMinutes(devotionParagraphs);
 
   useEffect(() => {
-    setNote(lsGet(`devotion.note.${verse?.id}`, ""));
+    setNote(verse?.id ? notes[verse.id] || "" : "");
     setDevotionOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [verse?.id]);
 
   useEffect(() => {
@@ -175,11 +358,14 @@ export default function App() {
     (text) => {
       if (!verse) return;
       setSaveState("saving");
-      lsSet(`devotion.note.${verse.id}`, text);
-      setSaveState("saved");
-      setTimeout(() => setSaveState("idle"), 1200);
+      const nextNotes = { ...notes, [verse.id]: text };
+      setNotes(nextNotes);
+      saveField("notes", nextNotes).then(() => {
+        setSaveState("saved");
+        setTimeout(() => setSaveState("idle"), 1200);
+      });
     },
-    [verse]
+    [verse, notes, saveField]
   );
 
   useEffect(() => {
@@ -194,7 +380,7 @@ export default function App() {
     const next = { ...favorites, [verse.id]: !favorites[verse.id] };
     if (!next[verse.id]) delete next[verse.id];
     setFavorites(next);
-    lsSet("devotion.favorites", next);
+    saveField("favorites", next);
   };
 
   const markPresented = () => {
@@ -202,7 +388,7 @@ export default function App() {
     const entry = { verseId: verse.id, ref: verse.ref, dateStr: today.toDateString(), date: today.toISOString() };
     const next = [entry, ...history.filter((h) => !(h.verseId === verse.id && h.dateStr === today.toDateString()))].slice(0, 100);
     setHistory(next);
-    lsSet("devotion.history", next);
+    saveField("history", next);
   };
 
   const shuffle = () => {
@@ -218,33 +404,16 @@ export default function App() {
   const resetToWeek = () => {
     setSeriesTheme(null);
     setIndex(defaultIndex);
+    if (weekOverrides[thisWeekKey]) setWeekOverride(thisWeekKey, null);
   };
 
-  // --- PIN handling ---
-  const submitPinSetup = (value) => {
-    lsSet("devotion.pin", value);
-    setPin(value);
-    setUnlocked(true);
-    sessionStorage.setItem("devotion.unlocked", "1");
-  };
-  const removePin = () => {
-    localStorage.removeItem("devotion.pin");
-    setPin(null);
-  };
-  const tryUnlock = () => {
-    if (pinAttempt === pin) {
-      setUnlocked(true);
-      sessionStorage.setItem("devotion.unlocked", "1");
-      setPinError("");
-      setPinAttempt("");
-    } else {
-      setPinError("That PIN doesn't match. Try again.");
-      setPinAttempt("");
-    }
-  };
   const saveProfileName = (name) => {
     setProfileName(name);
-    lsSet("devotion.profileName", name);
+    saveField("profile_name", name);
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
   };
 
   // --- custom verse form ---
@@ -262,7 +431,7 @@ export default function App() {
     };
     const next = [...customVerses, entry];
     setCustomVerses(next);
-    lsSet("devotion.customVerses", next);
+    saveField("custom_verses", next);
     setNewVerse({ ref: "", theme: "", text: "", devotion: "", reflection: "", application: "" });
     setAddVerseOpen(false);
   };
@@ -304,7 +473,7 @@ export default function App() {
   const handleExportNotes = () => {
     const parts = ["# Monday Devotion — Notes Export", `Exported ${formatDate(today)}`, ""];
     allVerses.forEach((v) => {
-      const noteText = lsGet(`devotion.note.${v.id}`, "");
+      const noteText = notes[v.id] || "";
       if (noteText && noteText.trim()) {
         parts.push(`## ${v.ref}`, "", noteText.trim(), "");
       }
@@ -336,30 +505,28 @@ export default function App() {
     return Object.entries(map).sort((a, b) => b[1] - a[1]);
   }, [allVerses]);
 
-  if (!pinReady) return null;
+  if (!dataReady) return <div className="min-h-screen w-full bg-[#EEF2EF]" />;
 
-  // --- lock screen ---
-  if (pin && !unlocked) {
+  // --- presentation mode (full-screen, distraction-free) ---
+  if (presentMode && verse) {
     return (
-      <div className="min-h-screen w-full bg-[#EEF2EF] text-[#1B2A2E] font-sans flex items-center justify-center px-6">
-        <div className="max-w-sm w-full bg-[#FBFAF7] border border-[#E2E7E1] rounded-2xl px-7 py-8 text-center">
-          <Lock className="w-6 h-6 mx-auto mb-3 text-[#5C7269]" />
-          <h1 className="text-lg font-semibold mb-1">Enter your PIN</h1>
-          <p className="text-sm text-[#5C7269] mb-4">This devotion space is private{profileName ? ` for ${profileName}` : ""}.</p>
-          <input
-            type="password"
-            inputMode="numeric"
-            value={pinAttempt}
-            onChange={(e) => setPinAttempt(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && tryUnlock()}
-            className="w-full text-center tracking-[0.5em] text-lg rounded-xl border border-[#D7DED9] bg-white px-4 py-3 mb-3 focus:outline-none focus:ring-2 focus:ring-[#3F6B5E]/30"
-            placeholder="••••"
-            autoFocus
-          />
-          {pinError && <p className="text-sm text-red-600 mb-3">{pinError}</p>}
-          <button onClick={tryUnlock} className="w-full bg-[#1B2A2E] text-white rounded-lg py-2.5 text-sm font-medium hover:bg-[#28393E] transition-colors">
-            <Unlock className="w-4 h-4 inline mr-1.5 -mt-0.5" /> Unlock
-          </button>
+      <div className="min-h-screen w-full bg-[#FBFAF7] text-[#1B2A2E] font-sans flex items-center justify-center px-6 py-10">
+        <button
+          onClick={() => setPresentMode(false)}
+          className="fixed top-5 right-5 inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg bg-white border border-[#D7DED9] hover:border-[#B7C4BB] transition-colors text-[#3A4A46] shadow-sm"
+        >
+          <Minimize2 className="w-4 h-4" /> Exit
+        </button>
+        <div className="max-w-2xl w-full">
+          <p className="text-[1.9rem] sm:text-[2.4rem] leading-[1.4] font-serif mb-6">"{verse.text}"</p>
+          <p className="text-base font-semibold tracking-wide text-[#C89B3C] mb-10">
+            — {verse.ref}{VERSES.find((v) => v.id === verse.id) ? " (KJV)" : ""}
+          </p>
+          <div className="space-y-6">
+            {devotionParagraphs.map((p, i) => (
+              <p key={i} className="text-lg sm:text-xl leading-relaxed text-[#3A4A46]">{p}</p>
+            ))}
+          </div>
         </div>
       </div>
     );
@@ -394,9 +561,8 @@ export default function App() {
           <SettingsPanel
             profileName={profileName}
             saveProfileName={saveProfileName}
-            pin={pin}
-            submitPinSetup={submitPinSetup}
-            removePin={removePin}
+            userEmail={userEmail}
+            handleLogout={handleLogout}
             onClose={() => setSettingsOpen(false)}
           />
         )}
@@ -495,6 +661,34 @@ export default function App() {
                 <p className="text-[0.95rem] leading-relaxed text-[#3A4A46]">{verse.application}</p>
               </div>
             </div>
+
+            {discussionQuestions.length > 0 && (
+              <div className="mt-6 pt-6 border-t border-[#EAEDE9] no-print">
+                <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.14em] text-[#8A9A93] font-semibold mb-2">
+                  <MessageCircleQuestion className="w-3.5 h-3.5" /> Discussion questions
+                </div>
+                <ul className="space-y-1.5">
+                  {discussionQuestions.map((q, i) => (
+                    <li key={i} className="text-[0.9rem] leading-relaxed text-[#3A4A46] flex gap-2">
+                      <span className="text-[#C89B3C]">{i + 1}.</span> {q}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {relatedVerses.length > 0 && (
+              <div className="mt-5 pt-5 border-t border-[#EAEDE9] no-print">
+                <div className="inline-flex items-center gap-1.5 text-[11px] uppercase tracking-[0.14em] text-[#8A9A93] font-semibold mb-2">
+                  <Link2 className="w-3.5 h-3.5" /> For further study
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {relatedVerses.map((r, i) => (
+                    <span key={i} className="text-xs px-2.5 py-1 rounded-full bg-[#F3F5F2] text-[#5C7269] border border-[#E2E7E1]">{r}</span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -527,8 +721,56 @@ export default function App() {
           <button onClick={handlePrint} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg bg-white border border-[#D7DED9] hover:border-[#B7C4BB] transition-colors text-[#3A4A46]">
             <Printer className="w-4 h-4" /> Print
           </button>
+          <button onClick={() => setPresentMode(true)} className="inline-flex items-center gap-1.5 text-sm px-3.5 py-2 rounded-lg bg-white border border-[#D7DED9] hover:border-[#B7C4BB] transition-colors text-[#3A4A46]">
+            <Maximize2 className="w-4 h-4" /> Present
+          </button>
           {copyFeedback && <span className="text-xs text-[#5C7269]">{copyFeedback}</span>}
         </div>
+
+        {/* Look-ahead & rotation */}
+        <div className="mt-6 border-t border-[#D7DED9] pt-4 no-print flex flex-wrap gap-4">
+          <button onClick={() => setLookAheadOpen(!lookAheadOpen)} className="inline-flex items-center gap-1.5 text-sm text-[#5C7269] hover:text-[#1B2A2E] transition-colors">
+            <CalendarDays className="w-4 h-4" /> Look ahead
+            {lookAheadOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+          <button onClick={() => setPresentersOpen(!presentersOpen)} className="inline-flex items-center gap-1.5 text-sm text-[#5C7269] hover:text-[#1B2A2E] transition-colors">
+            <Users className="w-4 h-4" /> Rotation{currentPresenter ? ` · ${currentPresenter} this week` : ""}
+            {presentersOpen ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+          </button>
+        </div>
+
+        {lookAheadOpen && (
+          <div className="mt-3 bg-white border border-[#E2E7E1] rounded-xl p-4 no-print space-y-2.5">
+            {lookAheadWeeks.map((w, i) => (
+              <div key={w.wKey} className="flex items-center justify-between gap-3 text-sm">
+                <div className="flex-1">
+                  <div className="text-[#8A9A93] text-xs">
+                    {formatDate(w.date).split(",")[0]}, {w.date.toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                    {i === 0 ? " (this week)" : ""}
+                    {w.presenter ? ` · ${w.presenter}` : ""}
+                  </div>
+                  <div className="text-[#1B2A2E] font-medium">
+                    {w.verse?.ref} {w.isOverride && <span className="text-[10px] text-[#C89B3C] uppercase tracking-wide">swapped</span>}
+                  </div>
+                </div>
+                <select
+                  value={w.isOverride ? w.verse.id : ""}
+                  onChange={(e) => setWeekOverride(w.wKey, e.target.value || null)}
+                  className="text-xs border border-[#D7DED9] rounded-lg px-2 py-1.5 bg-white max-w-[140px]"
+                >
+                  <option value="">Default</option>
+                  {allVerses.map((v) => (
+                    <option key={v.id} value={v.id}>{v.ref}</option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {presentersOpen && (
+          <PresentersPanel presenters={presenters} savePresenters={savePresenters} />
+        )}
 
         {/* Notes */}
         <div className="mt-6 no-print">
@@ -599,26 +841,59 @@ export default function App() {
   );
 }
 
-function SettingsPanel({ profileName, saveProfileName, pin, submitPinSetup, removePin, onClose }) {
-  const [nameInput, setNameInput] = useState(profileName);
-  const [newPin, setNewPin] = useState("");
-  const [confirmPin, setConfirmPin] = useState("");
-  const [pinMsg, setPinMsg] = useState("");
+function PresentersPanel({ presenters, savePresenters }) {
+  const [nameInput, setNameInput] = useState("");
 
-  const handleSetPin = () => {
-    if (newPin.length < 4) {
-      setPinMsg("PIN should be at least 4 digits.");
-      return;
-    }
-    if (newPin !== confirmPin) {
-      setPinMsg("PINs don't match.");
-      return;
-    }
-    submitPinSetup(newPin);
-    setNewPin("");
-    setConfirmPin("");
-    setPinMsg("PIN set.");
+  const addName = () => {
+    if (!nameInput.trim()) return;
+    savePresenters([...presenters, nameInput.trim()]);
+    setNameInput("");
   };
+  const removeName = (i) => {
+    savePresenters(presenters.filter((_, idx) => idx !== i));
+  };
+  const move = (i, dir) => {
+    const next = [...presenters];
+    const j = i + dir;
+    if (j < 0 || j >= next.length) return;
+    [next[i], next[j]] = [next[j], next[i]];
+    savePresenters(next);
+  };
+
+  return (
+    <div className="mt-3 bg-white border border-[#E2E7E1] rounded-xl p-4 no-print">
+      <p className="text-xs text-[#8A9A93] mb-3">
+        Add names in the order they should rotate. Whoever's up this week is shown automatically based on the week number — stored only on this device.
+      </p>
+      {presenters.length === 0 && <p className="text-sm text-[#8A9A93] mb-3">No presenters added yet.</p>}
+      <ul className="space-y-1.5 mb-3">
+        {presenters.map((name, i) => (
+          <li key={i} className="flex items-center justify-between text-sm bg-[#F7F8F6] border border-[#E2E7E1] rounded-lg px-3 py-1.5">
+            <span className="text-[#3A4A46]">{name}</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => move(i, -1)} className="text-[#8A9A93] hover:text-[#1B2A2E]"><ChevronLeft className="w-3.5 h-3.5" /></button>
+              <button onClick={() => move(i, 1)} className="text-[#8A9A93] hover:text-[#1B2A2E]"><ChevronRight className="w-3.5 h-3.5" /></button>
+              <button onClick={() => removeName(i)} className="text-[#8A9A93] hover:text-red-600"><X className="w-3.5 h-3.5" /></button>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <div className="flex gap-2">
+        <input
+          value={nameInput}
+          onChange={(e) => setNameInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && addName()}
+          placeholder="Add a name"
+          className="flex-1 text-sm rounded-lg border border-[#D7DED9] px-3 py-2"
+        />
+        <button onClick={addName} className="text-sm bg-[#1B2A2E] text-white rounded-lg px-4 py-2 hover:bg-[#28393E]">Add</button>
+      </div>
+    </div>
+  );
+}
+
+function SettingsPanel({ profileName, saveProfileName, userEmail, handleLogout, onClose }) {
+  const [nameInput, setNameInput] = useState(profileName);
 
   return (
     <div className="mb-6 bg-white border border-[#E2E7E1] rounded-xl p-4 no-print">
@@ -639,21 +914,12 @@ function SettingsPanel({ profileName, saveProfileName, pin, submitPinSetup, remo
 
       <div>
         <div className="text-[11px] uppercase tracking-[0.14em] text-[#8A9A93] font-semibold mb-1.5 inline-flex items-center gap-1.5">
-          <Lock className="w-3.5 h-3.5" /> Privacy PIN
+          <Mail className="w-3.5 h-3.5" /> Account
         </div>
-        <p className="text-xs text-[#8A9A93] mb-2">
-          {pin ? "A PIN is currently set. Anyone opening this app on your device will need it." : "Set a PIN so your notes stay private on this device. This is a device-level privacy lock, not a secure account system."}
-        </p>
-        {pin ? (
-          <button onClick={removePin} className="text-sm text-red-600 hover:text-red-700">Remove PIN</button>
-        ) : (
-          <div className="space-y-2">
-            <input type="password" inputMode="numeric" placeholder="New PIN (4+ digits)" value={newPin} onChange={(e) => setNewPin(e.target.value)} className="w-full text-sm rounded-lg border border-[#D7DED9] px-3 py-2" />
-            <input type="password" inputMode="numeric" placeholder="Confirm PIN" value={confirmPin} onChange={(e) => setConfirmPin(e.target.value)} className="w-full text-sm rounded-lg border border-[#D7DED9] px-3 py-2" />
-            <button onClick={handleSetPin} className="text-sm bg-[#1B2A2E] text-white rounded-lg px-4 py-2 hover:bg-[#28393E]">Set PIN</button>
-            {pinMsg && <p className="text-xs text-[#5C7269]">{pinMsg}</p>}
-          </div>
-        )}
+        <p className="text-sm text-[#3A4A46] mb-2">{userEmail}</p>
+        <button onClick={handleLogout} className="inline-flex items-center gap-1.5 text-sm text-red-600 hover:text-red-700">
+          <LogOut className="w-3.5 h-3.5" /> Log out
+        </button>
       </div>
     </div>
   );
